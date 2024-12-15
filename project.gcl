@@ -1,0 +1,22 @@
+type Record {
+  time: time;
+  value: int;
+}
+
+fn main() {
+  var reader = CsvReader<Record> {
+    path: "data.csv",
+    format: CsvFormat {
+      header_lines: 1,
+    },
+  };
+
+  var start = time::now();
+  var n = 0;
+  while (reader.can_read()) {
+    var record = reader.read();
+    n = n + 1;
+  }
+  var took = time::now() - start;
+  println("Took ${took} reading ${n} records");
+}
