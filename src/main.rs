@@ -12,9 +12,15 @@ use clap::Parser;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+const BUFFER_CAPACITY: usize = 4 * 1024 * 1024;
+
 #[derive(Debug, Parser)]
 struct Args {
-    #[arg(index = 1, default_value = "1000000", help = "Number of rows to generate")]
+    #[arg(
+        index = 1,
+        default_value = "1000000",
+        help = "Number of rows to generate"
+    )]
     nb_rows: usize,
 }
 
@@ -23,10 +29,12 @@ fn main() -> Result<()> {
     let records = create_records(args.nb_rows)?;
 
     println!(
-        "{:>4}{:>12}{:>12}{:>12}{:>12}",
-        "algo", "w (MB/s)", "r (MB/s)", "size (MB)", "took"
+        "{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}{:>12}",
+        "algo", "write_speed", "write_took", "read_speed", "read_took", "filesize", "total_time"
     );
     println!("{}", Benchmark::new("data.csv", Raw).bench(&records)?);
+    println!("{}", Benchmark::new("data.csv.gz1", Gzip1).bench(&records)?);
+    println!("{}", Benchmark::new("data.csv.gz9", Gzip9).bench(&records)?);
     println!("{}", Benchmark::new("data.csv.lz4", Lz4).bench(&records)?);
     println!("{}", Benchmark::new("data.csv.sz", Snap).bench(&records)?);
     println!("{}", Benchmark::new("data.csv.zstd", Zstd).bench(&records)?);
@@ -87,8 +95,12 @@ impl std::fmt::Display for BenchResult {
             (self.file_size as f64 / self.read_duration.as_secs() as f64) / 1024.0 / 1024.0;
         write!(
             f,
-            "{:>4}{w_speed:>12.2}{r_speed:>12.2}{:>12.2}{:>12.2?}",
+            "{:>12}{:>8.2}MB/s{:>12.2?}{:>8.2}MB/s{:>12.2?}{:>10.2}MB{:>12.2?}",
             self.algorithm,
+            w_speed,
+            self.write_duration,
+            r_speed,
+            self.read_duration,
             self.file_size as f64 / 1024.0 / 1024.0,
             self.write_duration + self.read_duration,
         )
@@ -103,13 +115,13 @@ struct Raw;
 impl Bench for Raw {
     fn bench(&self, filepath: &str, records: &[Record]) -> Result<BenchResult> {
         // write
-        let writer = BufWriter::new(File::create(filepath)?);
+        let writer = BufWriter::with_capacity(BUFFER_CAPACITY, File::create(filepath)?);
         let start = Instant::now();
         write_records(writer, records)?;
         let file_size = std::fs::metadata(filepath)?.size();
         let write_duration = start.elapsed();
         // read
-        let reader = BufReader::new(File::open(filepath)?);
+        let reader = BufReader::with_capacity(BUFFER_CAPACITY, File::open(filepath)?);
         let start = Instant::now();
         read_records(reader)?;
         let read_duration = start.elapsed();
@@ -127,13 +139,17 @@ struct Lz4;
 impl Bench for Lz4 {
     fn bench(&self, filepath: &str, records: &[Record]) -> Result<BenchResult> {
         // write
-        let writer = lz4::EncoderBuilder::new().build(BufWriter::new(File::create(filepath)?))?;
+        let writer = lz4::EncoderBuilder::new().build(BufWriter::with_capacity(
+            BUFFER_CAPACITY,
+            File::create(filepath)?,
+        ))?;
         let start = Instant::now();
         write_records(writer, records)?;
         let file_size = std::fs::metadata(filepath)?.size();
         let write_duration = start.elapsed();
         // read
-        let reader = BufReader::new(lz4::Decoder::new(File::open(filepath)?)?);
+        let reader =
+            BufReader::with_capacity(BUFFER_CAPACITY, lz4::Decoder::new(File::open(filepath)?)?);
         let start = Instant::now();
         read_records(reader)?;
         let read_duration = start.elapsed();
@@ -157,7 +173,8 @@ impl Bench for Zstd {
         let file_size = std::fs::metadata(filepath)?.size();
         let write_duration = start.elapsed();
         // read
-        let reader = BufReader::new(zstd::Decoder::new(File::open(filepath)?)?);
+        let reader =
+            BufReader::with_capacity(BUFFER_CAPACITY, zstd::Decoder::new(File::open(filepath)?)?);
         let start = Instant::now();
         read_records(reader)?;
         let read_duration = start.elapsed();
@@ -175,19 +192,85 @@ struct Snap;
 impl Bench for Snap {
     fn bench(&self, filepath: &str, records: &[Record]) -> Result<BenchResult> {
         // write
-        let writer = snap::write::FrameEncoder::new(File::create(filepath)?);
+        let writer = snap::write::FrameEncoder::new(BufWriter::with_capacity(
+            BUFFER_CAPACITY,
+            File::create(filepath)?,
+        ));
         let start = Instant::now();
         write_records(writer, records)?;
         let file_size = std::fs::metadata(filepath)?.size();
         let write_duration = start.elapsed();
         // read
-        let reader = snap::read::FrameDecoder::new(BufReader::new(File::open(filepath)?));
+        let reader = snap::read::FrameDecoder::new(BufReader::with_capacity(
+            BUFFER_CAPACITY,
+            File::open(filepath)?,
+        ));
         let start = Instant::now();
         read_records(reader)?;
         let read_duration = start.elapsed();
 
         Ok(BenchResult {
             algorithm: "snap",
+            write_duration,
+            file_size,
+            read_duration,
+        })
+    }
+}
+
+struct Gzip1;
+impl Bench for Gzip1 {
+    fn bench(&self, filepath: &str, records: &[Record]) -> Result<BenchResult> {
+        // write
+        let writer = flate2::write::GzEncoder::new(
+            BufWriter::with_capacity(BUFFER_CAPACITY, File::create(filepath)?),
+            flate2::Compression::new(1),
+        );
+        let start = Instant::now();
+        write_records(writer, records)?;
+        let file_size = std::fs::metadata(filepath)?.size();
+        let write_duration = start.elapsed();
+        // read
+        let reader = flate2::read::GzDecoder::new(BufReader::with_capacity(
+            BUFFER_CAPACITY,
+            File::open(filepath)?,
+        ));
+        let start = Instant::now();
+        read_records(reader)?;
+        let read_duration = start.elapsed();
+
+        Ok(BenchResult {
+            algorithm: "gzip(1)",
+            write_duration,
+            file_size,
+            read_duration,
+        })
+    }
+}
+
+struct Gzip9;
+impl Bench for Gzip9 {
+    fn bench(&self, filepath: &str, records: &[Record]) -> Result<BenchResult> {
+        // write
+        let writer = flate2::write::GzEncoder::new(
+            BufWriter::with_capacity(BUFFER_CAPACITY, File::create(filepath)?),
+            flate2::Compression::new(9),
+        );
+        let start = Instant::now();
+        write_records(writer, records)?;
+        let file_size = std::fs::metadata(filepath)?.size();
+        let write_duration = start.elapsed();
+        // read
+        let reader = flate2::read::GzDecoder::new(BufReader::with_capacity(
+            BUFFER_CAPACITY,
+            File::open(filepath)?,
+        ));
+        let start = Instant::now();
+        read_records(reader)?;
+        let read_duration = start.elapsed();
+
+        Ok(BenchResult {
+            algorithm: "gzip(9)",
             write_duration,
             file_size,
             read_duration,
