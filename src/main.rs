@@ -34,7 +34,7 @@ fn main() -> Result<()> {
     );
     println!("{}", Benchmark::new("data.csv", Raw).bench(&records)?);
     println!("{}", Benchmark::new("data.csv.gz1", Gzip1).bench(&records)?);
-    println!("{}", Benchmark::new("data.csv.gz9", Gzip9).bench(&records)?);
+    // println!("{}", Benchmark::new("data.csv.gz9", Gzip9).bench(&records)?);
     println!("{}", Benchmark::new("data.csv.lz4", Lz4).bench(&records)?);
     println!("{}", Benchmark::new("data.csv.sz", Snap).bench(&records)?);
     println!("{}", Benchmark::new("data.csv.zstd", Zstd).bench(&records)?);
@@ -248,6 +248,7 @@ impl Bench for Gzip1 {
     }
 }
 
+#[allow(dead_code)]
 struct Gzip9;
 impl Bench for Gzip9 {
     fn bench(&self, filepath: &str, records: &[Record]) -> Result<BenchResult> {

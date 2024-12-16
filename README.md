@@ -1,6 +1,6 @@
 Writes `N` rows of `ISO8601,VALUE` where value is a `i64` from `[0..10_000[`
 
-For 10,000,000 records on a Intel i7-8750H (12) @ 4.100GHz and an M2 NVMe:
+For 10,000,000 records on a Intel i7-8750H (12) @ 4.100GHz and a SATA MX500 SSD (theorical W:510MB/s,R:560MB/s)
 ```
         algo write_speed  write_took  read_speed   read_took    filesize  total_time
          raw  140.61MB/s       2.80s  140.61MB/s       2.49s    281.23MB       5.29s
